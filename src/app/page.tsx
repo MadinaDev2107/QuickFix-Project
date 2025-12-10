@@ -12,31 +12,30 @@ import {
   deleteDoc,
   updateDoc,
 } from "firebase/firestore";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import toast from "react-hot-toast";
 import Rodal from "rodal";
 import { FaMapMarkerAlt, FaClock, FaImage } from "react-icons/fa";
 import { AiOutlineEye, AiOutlineEdit, AiOutlineDelete } from "react-icons/ai";
-import { db } from "./firebase/firebase.config";
+import { db, auth } from "./firebase/firebase.config";
 import { useRouter } from "next/navigation";
 import { Muammo } from "./types";
-
-type User = {
-  isLoggedIn: boolean;
-  isAdmin: boolean;
-  id: string;
-};
-
-const currentUser: User = {
-  isLoggedIn: true, 
-  isAdmin: true, 
-  id: "user1",
-};
+import Footer from "./component/footer";
 
 export default function Page() {
+  const router = useRouter();
+
+  // Foydalanuvchi
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Muammolar
   const [muammolar, setMuammolar] = useState<Muammo[]>([]);
   const [descModal, setDescModal] = useState<Muammo | null>(null);
   const [editModal, setEditModal] = useState<Muammo | null>(null);
 
+  // Form state
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -45,62 +44,108 @@ export default function Page() {
   const [status, setStatus] = useState<Muammo["status"]>("kutilmoqda");
   const [loading, setLoading] = useState(false);
 
+  // Filter & search
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
-  const router = useRouter();
 
-  const [isLoggedIn, setIsLoggedIn] = useState(true); 
+  // === Auth listener ===
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsLoggedIn(Boolean(currentUser));
+      setIsAdmin(currentUser?.email === "admin@gmail.com");
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "muammolar"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list: Muammo[] = snapshot.docs.map((d) => ({
+        ...(d.data() as Muammo),
+        id: d.id,
+      }));
+      setMuammolar(list);
+    });
+    return () => unsub();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser.isLoggedIn) return toast.error("Login qilishingiz kerak!");
+    if (!user) {
+      toast.error("Iltimos, tizimga kiring!");
+      return;
+    }
     setLoading(true);
     try {
       await addDoc(collection(db, "muammolar"), {
         title,
         description,
         status,
-        imageUrl,
-        location,
-        ownerId: currentUser.id,
+        imageUrl: imageUrl || null,
+        location: location || null,
+        ownerId: user.uid,
+        ownerEmail: user.email || null,
         createdAt: serverTimestamp(),
       });
       toast.success("Muammo qo‘shildi!");
       clearForm();
       setIsFormOpen(false);
     } catch (err) {
-      console.log(err);
-      toast.error("Xatolik yuz berdi!");
+      console.error(err);
+      toast.error("Muammo qo‘shishda xatolik!");
     } finally {
       setLoading(false);
     }
   };
 
-  // Edit Muammo
+  // Edit muammo
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editModal) return;
+    if (!editModal || !user) return;
+    if (!isAdmin && editModal.ownerId !== user.uid) {
+      toast.error("Siz bu muammoni tahrirlash huquqiga ega emassiz.");
+      return;
+    }
     try {
       const docRef = doc(db, "muammolar", editModal.id);
       await updateDoc(docRef, {
         title,
         description,
         status,
-        imageUrl,
-        location,
+        imageUrl: imageUrl || null,
+        location: location || null,
       });
-      toast.success("Muammo tahrirlandi!");
+      toast.success("Muammo yangilandi!");
       setEditModal(null);
+      clearForm();
     } catch (err) {
-      console.log(err);
-      toast.error("Xatolik yuz berdi!");
+      console.error(err);
+      toast.error("Yangilashda xatolik yuz berdi.");
     }
   };
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    router.push("/auth");
+
+  // Delete muammo
+  const handleDelete = async (id: string, ownerId?: string) => {
+    if (!user) {
+      toast.error("Login qiling!");
+      return;
+    }
+    if (!isAdmin && ownerId !== user.uid) {
+      toast.error("O'chirish huquqingiz yo'q.");
+      return;
+    }
+    if (!confirm("Rostdan o'chirmoqchimisiz?")) return;
+    try {
+      await deleteDoc(doc(db, "muammolar", id));
+      toast.success("Muammo o‘chirildi!");
+    } catch (err) {
+      console.error(err);
+      toast.error("O'chirishda xatolik yuz berdi!");
+    }
   };
+
   const clearForm = () => {
     setTitle("");
     setDescription("");
@@ -109,62 +154,40 @@ export default function Page() {
     setStatus("kutilmoqda");
   };
 
-  useEffect(() => {
-    const q = query(collection(db, "muammolar"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const list: Muammo[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Muammo);
-      });
-      setMuammolar(list);
-    });
-    return () => unsub();
-  }, []);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "kutilmoqda":
-        return "bg-yellow-100 text-yellow-800";
-      case "tekshirilyapti":
-        return "bg-blue-100 text-blue-800";
-      case "bajarildi":
-        return "bg-green-100 text-green-800";
-      default:
-        return "";
-    }
-  };
-
-  const filter = muammolar.filter((m) => {
+  // Filtered list
+  const filtered = muammolar.filter((m) => {
     const matchesStatus =
       filterStatus === "all" ? true : m.status === filterStatus;
-
     const matchesType =
       filterType === "all"
         ? true
         : m.title.toLowerCase().includes(filterType) ||
           m.description.toLowerCase().includes(filterType);
-
-    const matchesSearch = m.title.toLowerCase().includes(search.toLowerCase());
-
+    const matchesSearch = m.title
+      .toLowerCase()
+      .includes(search.toLowerCase().trim());
     return matchesStatus && matchesType && matchesSearch;
   });
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Rostdan o'chirmoqchimisiz?")) return;
-    try {
-      await deleteDoc(doc(db, "muammolar", id));
-      toast.success("Muammo o'chirildi!");
-    } catch (err) {
-      console.log(err);
-      toast.error("Xatolik yuz berdi!");
-    }
+  // Logout
+  const Chiqish = () => {
+    signOut(auth).then(() => {
+      toast.success("Tizimdan chiqildi");
+      setUser(null);
+      // client-side router push
+      if (typeof window !== "undefined") router.push("/");
+    });
   };
-
+  // Go to login
+  const Login = () => {
+    if (typeof window !== "undefined") router.push("/auth");
+  };
   return (
     <div className="max-w-7xl mx-auto p-6">
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-3">
-        <div className="text-2xl font-bold text-green-700">
-          <h3 className="cursor-pointer">QuickFix</h3>
+        <div className="text-2xl font-bold text-green-700 cursor-pointer">
+          QuickFix
         </div>
         <div className="flex gap-2 flex-1 max-w-[500px]">
           <input
@@ -172,12 +195,12 @@ export default function Page() {
             placeholder="Search muammo..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="border p-2 rounded flex-1 w-50"
+            className="border p-2 rounded flex-1"
           />
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="border p-2 rounded w-50"
+            className="border p-2 rounded"
           >
             <option value="all">All Status</option>
             <option value="kutilmoqda">Kutilmoqda</option>
@@ -185,35 +208,35 @@ export default function Page() {
             <option value="bajarildi">Bajarildi</option>
           </select>
         </div>
-
-        {currentUser.isLoggedIn ? (
+        {user ? (
           <button
-            onClick={handleLogout}
-            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition"
+            onClick={Chiqish}
+            className="bg-red-500 text-white px-3 py-1 rounded"
           >
-            Logout
+            Chiqish
           </button>
         ) : (
-          <div>
-            <a href="/auth" className="text-blue-600 hover:underline mr-2">
-              Login
-            </a>
-            <a href="/auth" className="text-blue-600 hover:underline">
-              Register
-            </a>
-          </div>
+          <button
+            onClick={Login}
+            className="bg-[#245D30] text-white px-3 py-1 rounded"
+          >
+            Kirish
+          </button>
         )}
       </div>
 
-      {currentUser.isLoggedIn && (
+      {/* Add + Type Filter */}
+      {isLoggedIn && (
         <div className="flex items-center gap-3 mb-6">
           <button
             className="bg-green-700 text-white px-4 py-2 rounded hover:bg-green-800 transition"
-            onClick={() => setIsFormOpen(true)}
+            onClick={() => {
+              clearForm();
+              setIsFormOpen(true);
+            }}
           >
             Yangi muammo qo‘shish
           </button>
-
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
@@ -228,8 +251,9 @@ export default function Page() {
         </div>
       )}
 
+      {/* Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-        {filter.map((m) => (
+        {filtered.map((m) => (
           <div
             key={m.id}
             className="bg-white rounded shadow hover:shadow-lg transition p-4 flex flex-col justify-between"
@@ -248,17 +272,23 @@ export default function Page() {
 
             <h3 className="text-xl font-bold mb-2">{m.title}</h3>
             <span
-              className={`inline-block px-2 py-1 rounded text-sm font-semibold ${getStatusColor(
-                m.status
-              )} mb-2`}
+              className={`inline-block px-2 py-1 rounded text-sm font-semibold mb-2 ${
+                m.status === "kutilmoqda"
+                  ? "bg-yellow-100 text-yellow-800"
+                  : m.status === "tekshirilyapti"
+                  ? "bg-blue-100 text-blue-800"
+                  : "bg-green-100 text-green-800"
+              }`}
             >
               {m.status}
             </span>
+
             {m.location && (
               <p className="flex items-center gap-1 mb-1 text-gray-600">
                 <FaMapMarkerAlt /> {m.location}
               </p>
             )}
+
             <p className="flex items-center gap-1 mb-2 text-gray-600">
               <FaClock /> {m.createdAt?.toDate?.()?.toLocaleString() || "—"}
             </p>
@@ -271,15 +301,15 @@ export default function Page() {
                 <AiOutlineEye /> Show
               </button>
 
-              {(currentUser.isAdmin || m.ownerId === currentUser.id) && (
+              {(isAdmin || (user && m.ownerId === user.uid)) && (
                 <>
                   <button
                     className="flex items-center gap-1 bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 transition flex-1 justify-center"
                     onClick={() => {
                       setEditModal(m);
-                      setTitle(m.title);
-                      setDescription(m.description);
-                      setStatus(m.status);
+                      setTitle(m.title || "");
+                      setDescription(m.description || "");
+                      setStatus(m.status || "kutilmoqda");
                       setImageUrl(m.imageUrl || "");
                       setLocation(m.location || "");
                     }}
@@ -288,7 +318,7 @@ export default function Page() {
                   </button>
                   <button
                     className="flex items-center gap-1 bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 transition flex-1 justify-center"
-                    onClick={() => handleDelete(m.id)}
+                    onClick={() => handleDelete(m.id, m.ownerId)}
                   >
                     <AiOutlineDelete /> Delete
                   </button>
@@ -299,11 +329,13 @@ export default function Page() {
         ))}
       </div>
 
+      <Footer />
+
+      {/* Modallar */}
       <Rodal
         visible={isFormOpen}
         onClose={() => setIsFormOpen(false)}
-        width={500}
-        height={400}
+        customStyles={{ height: "max-content" }}
       >
         <h3 className="text-lg font-bold mb-2">Yangi Muammo</h3>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
@@ -331,7 +363,7 @@ export default function Page() {
           />
           <input
             type="text"
-            placeholder="Joylashuv (aniq ko'rsating)"
+            placeholder="Joylashuv"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="border p-2 rounded"
@@ -357,9 +389,11 @@ export default function Page() {
 
       <Rodal
         visible={!!editModal}
-        onClose={() => setEditModal(null)}
-        width={500}
-        height={400}
+        onClose={() => {
+          setEditModal(null);
+          clearForm();
+        }}
+        customStyles={{ height: "max-content" }}
       >
         <h3 className="text-lg font-bold mb-2">Edit Problem</h3>
         <form className="flex flex-col gap-3" onSubmit={handleEdit}>
@@ -413,8 +447,7 @@ export default function Page() {
       <Rodal
         visible={!!descModal}
         onClose={() => setDescModal(null)}
-        width={400}
-        height={250}
+        customStyles={{ height: "max-content" }}
       >
         <h3 className="text-lg font-bold mb-2">{descModal?.title}</h3>
         <p>{descModal?.description}</p>

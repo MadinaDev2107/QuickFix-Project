@@ -5,6 +5,6 @@ export type Muammo = {
   status: "kutilmoqda" | "tekshirilyapti" | "bajarildi";
   imageUrl?: string;
   location?: string;
-  createdAt: any;
+  createdAt?: any;
   ownerId: string;
 };

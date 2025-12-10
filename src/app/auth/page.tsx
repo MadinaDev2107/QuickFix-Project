@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
 import { auth } from "../firebase/firebase.config";
 
 export default function LoginPage() {
@@ -34,12 +37,16 @@ export default function LoginPage() {
       }
     } catch (err) {
       alert("Xatolik: login yoki parol noto‘g‘ri!");
+      console.log(err);
     }
   };
 
   return (
     <div className="min-h-screen flex justify-center items-center bg-gray-100">
-      <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow w-[350px]">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white p-6 rounded shadow w-[350px]"
+      >
         <h2 className="text-xl font-bold mb-4 text-center">
           {isLogin ? "Login" : "Register"}
         </h2>

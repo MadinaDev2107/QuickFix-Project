@@ -24,21 +24,21 @@ export default function AdminPage() {
     }
   }, [router]);
 
- useEffect(() => {
-  const q = query(collection(db, "muammolar")); 
-  const unsub = onSnapshot(q, (snapshot) => {
-    const list: any[] = [];
-    snapshot.forEach((doc) => {
-      list.push({ id: doc.id, ...doc.data() });
+  useEffect(() => {
+    const q = query(collection(db, "muammolar"));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list: Muammo[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ ...(doc.data() as Muammo), id: doc.id });
+      });
+
+      setMuammolar(list);
+      setBajarilgan(list.filter((m) => m.status === "bajarildi"));
+      setKutayotgan(list.filter((m) => m.status === "kutilmoqda"));
     });
 
-    setMuammolar(list);
-    setBajarilgan(list.filter((m) => m.status === "bajarildi"));
-    setKutayotgan(list.filter((m) => m.status === "kutilmoqda"));
-  });
-
-  return () => unsub();
-}, []);
+    return () => unsub();
+  }, []);
 
   return (
     <div className="p-6 ">
